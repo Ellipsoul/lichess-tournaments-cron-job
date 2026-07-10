@@ -1,4 +1,8 @@
-import { lichessApiBaseUrl, tournamentOrganizers } from "./config.js";
+import {
+  createdTournamentFetchLimitByOrganizer,
+  lichessApiBaseUrl,
+  tournamentOrganizers,
+} from "./config.js";
 
 /** The subset of a team arena tournament used by this application. */
 export interface Tournament {
@@ -7,15 +11,26 @@ export interface Tournament {
   startsAt: number;
 }
 
-interface TeamArenaTournament extends Tournament {
+/**
+ * Lichess includes this object on `GET /api/tournament/{id}` when the bearer
+ * token's account is registered for that tournament.
+ */
+interface TournamentPlayerMe {
+  rank: number;
+  withdraw?: boolean;
+}
+
+/** Subset of the authenticated tournament detail response used for join checks. */
+interface TournamentDetail {
+  me?: TournamentPlayerMe;
+}
+
+interface OrganiserTeamBattleTournament extends Tournament {
   teamBattle?: {
-    teams?: string[];
+    teams?: string[] | Record<string, unknown>;
     nbLeaders?: number;
   };
 }
-
-/** Maximum upcoming tournaments to request per organiser. */
-const teamArenaFetchLimitPerOrganizer = 20;
 
 /**
  * Status codes for temporary failures. Retrying these is useful; retrying a
@@ -96,32 +111,52 @@ export function parseNdjson<T>(body: string): T[] {
 }
 
 /** Returns true when Lichess marks the arena as a team battle. */
-export function isTeamBattle(tournament: TeamArenaTournament): boolean {
+export function isTeamBattle(tournament: OrganiserTeamBattleTournament): boolean {
   return tournament.teamBattle != null;
 }
 
 /**
- * Fetches upcoming arena tournaments relevant to the configured team.
+ * Returns true when the configured team is listed in a team battle's team set.
  *
- * Requests are made once per known organiser because the team arena endpoint
- * sorts by farthest start date first and can omit nearer events behind `max`.
- * The endpoint can also return member-only arenas that are not team battles.
+ * Lichess returns `teamBattle.teams` as an array on list endpoints and as an
+ * object keyed by team ID on the single-tournament endpoint.
  */
-export async function getUpcomingTeamArenaTournaments(teamId: string): Promise<Tournament[]> {
+export function tournamentIncludesTeam(
+  tournament: OrganiserTeamBattleTournament,
+  teamId: string,
+): boolean {
+  const teams = tournament.teamBattle?.teams;
+  if (!teams) return false;
+  if (Array.isArray(teams)) return teams.includes(teamId);
+  return teamId in teams;
+}
+
+/**
+ * Fetches created and started team battles the configured team may enter.
+ *
+ * The team arena listing is incomplete for some events and omits tournaments
+ * that have already started. Querying each organiser's created tournaments is
+ * more reliable, then filtering to team battles that include the team ID.
+ */
+export async function getEligibleOrganiserTeamBattles(teamId: string): Promise<Tournament[]> {
   const tournamentsById = new Map<string, Tournament>();
 
   for (const createdBy of tournamentOrganizers) {
-    const url = new URL(`${lichessApiBaseUrl}/team/${encodeURIComponent(teamId)}/arena`);
-    url.searchParams.set("status", "created");
-    url.searchParams.set("createdBy", createdBy);
-    url.searchParams.set("max", String(teamArenaFetchLimitPerOrganizer));
+    const url = new URL(
+      `${lichessApiBaseUrl}/user/${encodeURIComponent(createdBy)}/tournament/created`,
+    );
+    url.searchParams.append("status", "10");
+    url.searchParams.append("status", "20");
+    url.searchParams.set("nb", String(createdTournamentFetchLimitByOrganizer[createdBy]));
 
     const response = await request(url.toString(), {
       headers: { Accept: "application/x-ndjson" },
     });
     if (!response.ok) throw await responseError(response);
 
-    for (const tournament of parseNdjson<TeamArenaTournament>(await response.text()).filter(isTeamBattle)) {
+    for (const tournament of parseNdjson<OrganiserTeamBattleTournament>(await response.text()).filter(
+      (entry) => isTeamBattle(entry) && tournamentIncludesTeam(entry, teamId),
+    )) {
       tournamentsById.set(tournament.id, {
         id: tournament.id,
         fullName: tournament.fullName,
@@ -130,7 +165,44 @@ export async function getUpcomingTeamArenaTournaments(teamId: string): Promise<T
     }
   }
 
-  return [...tournamentsById.values()];
+  return [...tournamentsById.values()].sort((left, right) => left.startsAt - right.startsAt);
+}
+
+/**
+ * Derives join status from the `me` object on a tournament detail response.
+ *
+ * Exported for unit tests; production code calls `getTournamentPlayerStatus`.
+ */
+export function interpretTournamentPlayerStatus(detail: TournamentDetail): {
+  joined: boolean;
+  withdrawn: boolean;
+} {
+  if (!detail.me) return { joined: false, withdrawn: false };
+  return { joined: !detail.me.withdraw, withdrawn: detail.me.withdraw === true };
+}
+
+/**
+ * Reports whether the bearer token's account is registered for a tournament.
+ *
+ * Lichess exposes a `me` object on the tournament detail endpoint when the
+ * authenticated user has joined. A withdrawn (paused) player still has `me`,
+ * but with `withdraw: true`; those accounts should be treated as not joined so
+ * the join endpoint can unpause them.
+ */
+export async function getTournamentPlayerStatus(
+  id: string,
+  token: string,
+): Promise<{ joined: boolean; withdrawn: boolean }> {
+  const response = await request(`${lichessApiBaseUrl}/tournament/${id}`, {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!response.ok) throw await responseError(response);
+
+  const detail = (await response.json()) as TournamentDetail;
+  return interpretTournamentPlayerStatus(detail);
 }
 
 /**

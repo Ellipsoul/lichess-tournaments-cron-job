@@ -10,7 +10,7 @@ Several popular Lichess team-battle series run on a regular schedule—Bullet Le
 2. Matches them against a fixed set of title patterns.
 3. Sends a join request for every match.
 
-The script keeps no database or state between runs. Lichess remains the source of truth for eligibility, timing, and whether an account has already joined.
+The script keeps no database or state between runs. Lichess remains the source of truth for eligibility, timing, and whether an account has already joined. When a token is available, each matching tournament is checked via `GET /api/tournament/{id}`; Lichess includes a `me` object when the account is already registered.
 
 ## How it works
 
@@ -18,16 +18,21 @@ The script keeps no database or state between runs. Lichess remains the source o
 GitHub Actions (daily at 10:00 UTC)
         |
         v
-GET /api/team/{teamId}/arena?status=created  (once per organiser)
+GET /api/user/{organiser}/tournament/created?status=10&status=20  (once per organiser)
         |
         v
-Keep only team battles; match titles against the four target series
+Keep team battles that include your team ID; match titles against the four target series
         |
         v
-Dry run: log matches          Real run: POST /api/tournament/{id}/join
+When a token is present: GET /api/tournament/{id} per match to split already joined vs to join
+        |
+        v
+Dry run: log both groups          Real run: POST /api/tournament/{id}/join for to-join only
 ```
 
-On each run the script calls the [Lichess team arena API](https://lichess.org/api#tag/Teams/operation/apiTeamArena) once per known organiser (`luisalce`, `jeffforever`, and `cormacobear`), using the `createdBy` filter so nearer events are not hidden behind the API's default sort order. It keeps only tournaments with a `teamBattle` field, then applies anchored regular expressions in `src/config.ts` to decide which titles to join.
+On each run the script calls the [Lichess user-created tournaments API](https://lichess.org/api#tag/Arena-tournaments/operation/apiUserNameTournamentCreated) once per known organiser (`luisalce`, `jeffforever`, and `cormacobear`), requesting both created and started events. It keeps only team battles whose `teamBattle.teams` list includes your team ID, then applies anchored regular expressions in `src/config.ts` to decide which titles to join. The older team arena listing was unreliable: it omitted some eligible events (for example Bundesliga) and excluded tournaments that had already started (for example Mega).
+
+`npm start` loads `.env.local` automatically when the file exists, so a dry run can use your token for already-joined detection without exporting variables manually.
 
 ## Tournaments joined
 
@@ -61,7 +66,7 @@ npm run check
 
 ### Dry run (recommended first)
 
-A dry run lists matching tournaments without joining anything. It uses only public Lichess data and does not need an API token, but it does need your team ID.
+A dry run lists matching tournaments without joining anything. It needs your team ID. For accurate already-joined detection, provide a token as well (for example via `.env.local`, which `npm start` loads automatically). Without a token, every match is listed under "To join".
 
 ```sh
 DRY_RUN=true LICHESS_TEAM_ID=your-team-id npm start
@@ -71,7 +76,11 @@ Example output:
 
 ```text
 Found 2 upcoming team battles; 2 match.
-[dry run] Would join 143rd Lichess Mega Team Battle (2agD9179, 2026-07-10T16:00:00.000Z).
+[dry run] Already joined (1):
+  142nd Lichess Mega Team Battle (2agD9179, 2026-07-10T16:00:00.000Z)
+[dry run] To join (1):
+  Lichess Bullet League 33A Team Battle (abc12345, 2026-07-11T18:00:00.000Z)
+[dry run] Would join Lichess Bullet League 33A Team Battle (abc12345, 2026-07-11T18:00:00.000Z).
 ```
 
 ### Real run

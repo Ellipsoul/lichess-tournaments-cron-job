@@ -11,6 +11,22 @@ export const lichessApiBaseUrl = "https://lichess.org/api";
 export const tournamentOrganizers = ["luisalce", "jeffforever", "cormacobear"] as const;
 
 /**
+ * How many created/started tournaments to request per organiser.
+ *
+ * The organiser-created endpoint sorts farthest in the future first. Jeffforever
+ * schedules many Rapid League divisions, so a higher limit is required before
+ * nearer Bundesliga and Rapid events appear in the stream.
+ */
+export const createdTournamentFetchLimitByOrganizer: Record<
+  (typeof tournamentOrganizers)[number],
+  number
+> = {
+  luisalce: 50,
+  jeffforever: 400,
+  cormacobear: 100,
+};
+
+/**
  * Tournament series this job joins automatically.
  *
  * `fullName` is the stable, human-readable tournament title returned by

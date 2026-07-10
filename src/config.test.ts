@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { matchesTargetTournament, validateJoinConfig } from "./config.js";
-import { isTeamBattle, parseNdjson } from "./lichess.js";
+import { isTeamBattle, parseNdjson, tournamentIncludesTeam } from "./lichess.js";
 
 /** These are representative titles from each verified tournament series. */
 test("matches the four verified team battle series", () => {
@@ -66,5 +66,27 @@ test("isTeamBattle checks for the teamBattle field", () => {
       startsAt: 0,
     }),
     false,
+  );
+});
+
+test("tournamentIncludesTeam accepts array and object team lists", () => {
+  const tournament = {
+    id: "a",
+    fullName: "Example",
+    startsAt: 0,
+    teamBattle: { teams: ["example-team", "other-team"], nbLeaders: 5 },
+  };
+
+  assert.equal(tournamentIncludesTeam(tournament, "example-team"), true);
+  assert.equal(tournamentIncludesTeam(tournament, "missing-team"), false);
+  assert.equal(
+    tournamentIncludesTeam(
+      {
+        ...tournament,
+        teamBattle: { teams: { "example-team": ["Example Team", null] }, nbLeaders: 5 },
+      },
+      "example-team",
+    ),
+    true,
   );
 });
