@@ -2,8 +2,8 @@ name: Join Lichess team tournaments
 
 on:
   schedule:
-    # Daily at 07:17 UTC. GitHub may delay scheduled workflows during high load.
-    - cron: "17 7 * * *"
+    # Daily at 10:00 UTC. GitHub may delay scheduled workflows during high load.
+    - cron: "0 10 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -22,7 +22,6 @@ jobs:
     env:
       LICHESS_API_TOKEN: ${{ secrets.LICHESS_API_TOKEN }}
       LICHESS_TEAM_ID: ${{ secrets.LICHESS_TEAM_ID }}
-      TOURNAMENT_NAME_SUFFIXES: ${{ vars.TOURNAMENT_NAME_SUFFIXES }}
       DRY_RUN: ${{ inputs.dry_run || 'false' }}
     steps:
       - uses: actions/checkout@v4
