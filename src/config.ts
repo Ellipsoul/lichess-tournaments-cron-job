@@ -2,10 +2,19 @@
 export const lichessApiBaseUrl = "https://lichess.org/api";
 
 /**
+ * Lichess accounts that create the recurring team-battle series this job joins.
+ *
+ * The team arena endpoint returns tournaments farthest in the future first, so a
+ * single unfiltered request can omit nearer events once the team has many entries.
+ * Querying each organiser separately keeps discovery reliable.
+ */
+export const tournamentOrganizers = ["luisalce", "jeffforever", "cormacobear"] as const;
+
+/**
  * Tournament series this job joins automatically.
  *
  * `fullName` is the stable, human-readable tournament title returned by
- * Lichess's `GET /api/tournament` endpoint. Anchoring each expression with
+ * Lichess's team arena endpoint. Anchoring each expression with
  * `^` and `$` matters: it prevents a similarly named, unrelated tournament
  * from matching merely because it contains a target series name.
  *
@@ -23,9 +32,9 @@ const defaultNamePatterns = [
 /**
  * All configuration required for one execution of the job.
  *
- * Secrets remain optional in the type because a dry run deliberately needs no
- * credentials. `validateJoinConfig` checks that they are present before a
- * real join request is ever sent.
+ * Secrets remain optional in the type because tests can pass partial config.
+ * `validateJoinConfig` checks that required values are present before the run
+ * fetches tournaments or sends join requests.
  */
 export interface RuntimeConfig {
   dryRun: boolean;
@@ -60,19 +69,19 @@ export function matchesTargetTournament(fullName: string): boolean {
 }
 
 /**
- * Stops a real run early if its required GitHub secrets are missing.
+ * Stops a run early if its required configuration is missing.
  *
- * A dry run returns immediately because it only reads public Lichess data and
- * never calls the authenticated join endpoint.
+ * The team ID is always required because upcoming tournaments are fetched from
+ * the team arena endpoint. A token is only required for real join requests.
  */
 export function validateJoinConfig(config: RuntimeConfig): void {
+  if (!config.teamId) {
+    throw new Error(
+      "LICHESS_TEAM_ID is required: upcoming team battles are fetched from the team arena endpoint and Lichess requires the team to join with.",
+    );
+  }
   if (config.dryRun) return;
   if (!config.token) {
     throw new Error("LICHESS_API_TOKEN is required unless DRY_RUN=true.");
-  }
-  if (!config.teamId) {
-    throw new Error(
-      "LICHESS_TEAM_ID is required: these are team battles and Lichess requires the team to join with.",
-    );
   }
 }

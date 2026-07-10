@@ -1,15 +1,21 @@
-import { lichessApiBaseUrl } from "./config.js";
+import { lichessApiBaseUrl, tournamentOrganizers } from "./config.js";
 
-/** The subset of a newly created tournament used by this application. */
+/** The subset of a team arena tournament used by this application. */
 export interface Tournament {
   id: string;
   fullName: string;
   startsAt: number;
 }
 
-interface TournamentResponse {
-  created: Tournament[];
+interface TeamArenaTournament extends Tournament {
+  teamBattle?: {
+    teams?: string[];
+    nbLeaders?: number;
+  };
 }
+
+/** Maximum upcoming tournaments to request per organiser. */
+const teamArenaFetchLimitPerOrganizer = 20;
 
 /**
  * Status codes for temporary failures. Retrying these is useful; retrying a
@@ -58,20 +64,73 @@ async function responseError(response: Response): Promise<Error> {
 }
 
 /**
- * Fetches Lichess's public list of newly created tournaments.
+ * Parses a Lichess NDJSON response body into individual JSON objects.
  *
- * The endpoint also returns other groups, but this job intentionally consumes
- * only `created`: older or currently running tournaments should not be
- * rediscovered by this scheduled automation.
+ * Most endpoints stream one JSON object per line. Some responses concatenate
+ * objects without newlines, so a brace-counting fallback is used when needed.
  */
-export async function getNewTournaments(): Promise<Tournament[]> {
-  const response = await request(`${lichessApiBaseUrl}/tournament`, {
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok) throw await responseError(response);
+export function parseNdjson<T>(body: string): T[] {
+  const trimmed = body.trim();
+  if (!trimmed) return [];
 
-  const data = (await response.json()) as TournamentResponse;
-  return data.created ?? [];
+  const lines = trimmed.split("\n").filter(Boolean);
+  if (lines.length > 1 || (lines.length === 1 && !trimmed.includes("}{"))) {
+    return lines.map((line) => JSON.parse(line) as T);
+  }
+
+  const objects: T[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < trimmed.length; index += 1) {
+    if (trimmed[index] === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+    } else if (trimmed[index] === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        objects.push(JSON.parse(trimmed.slice(start, index + 1)) as T);
+      }
+    }
+  }
+  return objects;
+}
+
+/** Returns true when Lichess marks the arena as a team battle. */
+export function isTeamBattle(tournament: TeamArenaTournament): boolean {
+  return tournament.teamBattle != null;
+}
+
+/**
+ * Fetches upcoming arena tournaments relevant to the configured team.
+ *
+ * Requests are made once per known organiser because the team arena endpoint
+ * sorts by farthest start date first and can omit nearer events behind `max`.
+ * The endpoint can also return member-only arenas that are not team battles.
+ */
+export async function getUpcomingTeamArenaTournaments(teamId: string): Promise<Tournament[]> {
+  const tournamentsById = new Map<string, Tournament>();
+
+  for (const createdBy of tournamentOrganizers) {
+    const url = new URL(`${lichessApiBaseUrl}/team/${encodeURIComponent(teamId)}/arena`);
+    url.searchParams.set("status", "created");
+    url.searchParams.set("createdBy", createdBy);
+    url.searchParams.set("max", String(teamArenaFetchLimitPerOrganizer));
+
+    const response = await request(url.toString(), {
+      headers: { Accept: "application/x-ndjson" },
+    });
+    if (!response.ok) throw await responseError(response);
+
+    for (const tournament of parseNdjson<TeamArenaTournament>(await response.text()).filter(isTeamBattle)) {
+      tournamentsById.set(tournament.id, {
+        id: tournament.id,
+        fullName: tournament.fullName,
+        startsAt: tournament.startsAt,
+      });
+    }
+  }
+
+  return [...tournamentsById.values()];
 }
 
 /**

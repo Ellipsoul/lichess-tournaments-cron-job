@@ -1,105 +1,151 @@
-# Lichess team tournament joiner
+# Lichess Team Tournament Joiner
 
-This project automatically joins selected Lichess team battles for one Lichess account. Once it has been connected to a GitHub repository, GitHub runs it every day at **10:00 UTC**.
+A small scheduled automation that joins recurring Lichess team battles on behalf of one account and team. It is designed to run as a daily GitHub Actions workflow, with an optional dry-run mode for safe verification.
 
-## What you need to do
+## Purpose
 
-You do not need to install anything on your computer to use the scheduled version. Complete these one-time steps after putting this repository on GitHub:
+Several popular Lichess team-battle series run on a regular schedule—Bullet League, Bundesliga, Mega Team Battle, and Rapid League. Registering for each event manually is easy to forget. This repository runs a short script once per day that:
 
-1. Create a Lichess personal access token at [Lichess token settings](https://lichess.org/account/oauth/token). Give it the **`tournament:write`** permission. Treat this token like a password.
-2. Find your team ID. Open your Lichess team's page and copy the text at the end of its address. For example, the team ID in `https://lichess.org/team/example-team` is `example-team`.
-3. On GitHub, open this repository's **Settings → Secrets and variables → Actions** page. Under **Secrets**, create:
-   - `LICHESS_API_TOKEN` — your Lichess token.
-   - `LICHESS_TEAM_ID` — your team ID.
-4. Open the repository's **Actions** tab, choose **Join Lichess team tournaments**, click **Run workflow**, and first select **dry run**. The log will show the events it would join, without joining anything.
-5. If the dry run looks right, run it again with dry run turned off. From then on, the scheduled run handles it daily at 10:00 UTC.
+1. Fetches upcoming team battles your team is eligible for.
+2. Matches them against a fixed set of title patterns.
+3. Sends a join request for every match.
 
-GitHub may start scheduled workflows a little later than the requested time when its service is busy. You can always run the workflow manually from the Actions tab.
+The script keeps no database or state between runs. Lichess remains the source of truth for eligibility, timing, and whether an account has already joined.
 
-## What it joins
-
-The job checks Lichess's newly created tournament list and joins these recurring team-battle series:
-
-- `Lichess Bullet League 33A Team Battle` — every numbered Bullet League division.
-- `Lichess Bundesliga Team Battle`.
-- `142nd Lichess Mega Team Battle` — every numbered Mega Team Battle.
-- `199th Lichess Rapid League 1 Team Battle` — every numbered Rapid League division, including divisions such as `3B`.
-
-The examples above are representative titles, not hard-coded event numbers. The number changes each time a series returns. The Rapid League rule was verified against [199th Lichess Rapid League 1 Team Battle](https://lichess.org/tournament/iQErzJWb).
-
-## Safety and privacy
-
-- Your token is stored as a GitHub secret. It is supplied to the workflow only while it runs and is never committed to this repository or printed in the program's logs.
-- A dry run uses only public tournament data and makes no join requests.
-- The script has no database. On each run it asks Lichess for newly created tournaments and asks to join every matching one. Lichess decides whether the account is eligible or already joined.
-- A failed run is shown as failed in GitHub Actions, with an error in the workflow log. Temporary network errors and Lichess rate limits are retried automatically a small number of times.
-
----
-
-## Technical reference
-
-### How one run works
+## How it works
 
 ```text
 GitHub Actions (daily at 10:00 UTC)
         |
         v
-Fetch Lichess's newly created tournaments
+GET /api/team/{teamId}/arena?status=created  (once per organiser)
         |
         v
-Match titles against the four target series
+Keep only team battles; match titles against the four target series
         |
         v
-Dry run: print matches      Real run: POST a join request for each match
+Dry run: log matches          Real run: POST /api/tournament/{id}/join
 ```
 
-The implementation calls Lichess's public `GET /api/tournament` endpoint and reads its `created` list. For a real run, it then calls authenticated `POST /api/tournament/{id}/join` with the configured team ID. See the [official Lichess API documentation](https://lichess.org/api#tag/tournaments-arena) for the current endpoint contract and token permissions.
+On each run the script calls the [Lichess team arena API](https://lichess.org/api#tag/Teams/operation/apiTeamArena) once per known organiser (`luisalce`, `jeffforever`, and `cormacobear`), using the `createdBy` filter so nearer events are not hidden behind the API's default sort order. It keeps only tournaments with a `teamBattle` field, then applies anchored regular expressions in `src/config.ts` to decide which titles to join.
 
-### Project layout
+## Tournaments joined
 
-```text
-.github/workflows/join-tournaments.yml  GitHub's schedule and job definition
-src/config.ts                            Configuration, title rules, and validation
-src/lichess.ts                           Small, retrying Lichess API client
-src/index.ts                             One-run orchestration and log output
-src/config.test.ts                       Matcher tests
-.env.example                             Documented template for local settings
-```
+The job joins these recurring series (ordinal numbers change each event):
 
-### Title matching
+| Series | Example title |
+| --- | --- |
+| Bullet League | `Lichess Bullet League 33A Team Battle` |
+| Bundesliga | `Lichess Bundesliga Team Battle` |
+| Mega Team Battle | `142nd Lichess Mega Team Battle` |
+| Rapid League | `199th Lichess Rapid League 1 Team Battle` |
 
-`src/config.ts` uses anchored, case-insensitive regular expressions for exactly the four known series. Anchors mean that a tournament must have the whole expected title, preventing an accidental match against an unrelated title that merely contains similar words. There is intentionally no environment-variable override: adding a new series requires a narrowly scoped code change and an accompanying test.
+Division suffixes such as `3B` in Rapid League are supported. Adding a new series requires a code change and a test in `src/config.test.ts`; there is no environment-variable override.
 
-### Local development
+## Local development
 
-The scheduled workflow installs dependencies with `npm ci`, type-checks the project, then runs it. To do the equivalent locally, use Node.js 22 or newer:
+**Requirements:** Node.js 22 or newer.
 
 ```sh
+git clone https://github.com/Ellipsoul/lichess-tournaments-cron-job.git
+cd lichess-tournaments-cron-job
 npm install
-npm run check
-npm test
-DRY_RUN=true npm start
 ```
 
-The dry run does not need a token or team ID. To make a real local request, copy the values in `.env.example` into your shell environment (or export them directly) and run `npm start`. Never commit a real token; `.env` files are ignored by Git.
+### Run tests and type-check
 
-### Testing changes to a matcher
+```sh
+npm test
+npm run check
+```
 
-When adding or changing a title rule:
+### Dry run (recommended first)
+
+A dry run lists matching tournaments without joining anything. It uses only public Lichess data and does not need an API token, but it does need your team ID.
+
+```sh
+DRY_RUN=true LICHESS_TEAM_ID=your-team-id npm start
+```
+
+Example output:
+
+```text
+Found 2 upcoming team battles; 2 match.
+[dry run] Would join 143rd Lichess Mega Team Battle (2agD9179, 2026-07-10T16:00:00.000Z).
+```
+
+### Real run
+
+To join tournaments locally, provide a Lichess personal access token with the `tournament:write` scope. Copy `.env.example` to `.env.local` (or export the variables in your shell) and run:
+
+```sh
+npm start
+```
+
+Never commit a real token. `.env` files are ignored by Git.
+
+### Changing a title matcher
 
 1. Add a representative positive case to `src/config.test.ts`.
-2. Add a similar-but-unwanted negative case if it helps prevent an overly broad match.
+2. Add a negative case if it helps prevent an overly broad match.
 3. Run `npm test` and `npm run check`.
-4. Use a manual GitHub Actions dry run before enabling real joining.
+4. Verify with a dry run before enabling real joining.
 
-### Workflow inputs and environment
+## GitHub Actions setup
 
-| Name | Where it is set | Purpose |
+The workflow in `.github/workflows/join-tournaments.yml` runs daily at **10:00 UTC** and can also be triggered manually from the Actions tab.
+
+### 1. Create a Lichess token
+
+Create a [personal access token](https://lichess.org/account/oauth/token) with the **`tournament:write`** permission. Treat it like a password.
+
+### 2. Find your team ID
+
+Open your Lichess team page and copy the final segment of the URL. For `https://lichess.org/team/example-team`, the team ID is `example-team`.
+
+### 3. Add GitHub secrets
+
+In your fork of this repository, open **Settings → Secrets and variables → Actions** and create:
+
+| Secret | Description |
+| --- | --- |
+| `LICHESS_API_TOKEN` | Your Lichess personal access token |
+| `LICHESS_TEAM_ID` | The team ID that will join each battle |
+
+These secrets are loaded from the **GitHub Action Environment** configured in the workflow.
+
+### 4. Verify with a dry run
+
+1. Open the **Actions** tab.
+2. Select **Join Lichess team tournaments**.
+3. Click **Run workflow**, enable **dry run**, and run it.
+4. Check the log for the tournaments that would be joined.
+
+### 5. Enable scheduled joining
+
+Run the workflow again with dry run disabled. From then on, the daily schedule handles registration automatically. GitHub may start scheduled workflows slightly late during high load; you can always trigger a manual run from the Actions tab.
+
+## Configuration
+
+| Variable | Required | Purpose |
 | --- | --- | --- |
-| `LICHESS_API_TOKEN` | GitHub Actions secret | Authenticates real join requests; requires `tournament:write`. |
-| `LICHESS_TEAM_ID` | GitHub Actions secret | The team that joins each team battle. |
-| `DRY_RUN` | Manual workflow input or local environment | When `true`, lists matches without joining them. |
+| `LICHESS_TEAM_ID` | Always | Team whose upcoming arena tournaments are fetched and used when joining |
+| `LICHESS_API_TOKEN` | Real runs only | Authenticates join requests (`tournament:write` scope) |
+| `DRY_RUN` | No | When `true`, lists matches without joining (`false` by default) |
 
-### Failure and retry behaviour
+## Project structure
 
-Requests are retried twice after a network failure or the temporary HTTP statuses `429`, `502`, `503`, and `504`. When Lichess sends a numeric `Retry-After` header, the client respects it; otherwise it waits 1 second and then 2 seconds. Authentication and validation failures are not retried because they need a configuration correction.
+```text
+.github/workflows/join-tournaments.yml   Scheduled and manual GitHub Actions workflow
+src/config.ts                              Title patterns, organisers, and validation
+src/lichess.ts                             Lichess API client with retry logic
+src/index.ts                               Run orchestration and log output
+src/config.test.ts                         Matcher and parsing tests
+.env.example                               Local environment template
+```
+
+## Reliability and security
+
+- Tokens are supplied to the workflow only at runtime and are never logged or committed.
+- Transient network errors and HTTP `429`, `502`, `503`, and `504` responses are retried up to twice. A numeric `Retry-After` header is respected when present.
+- Authentication and validation failures are not retried; fix the configuration and re-run.
