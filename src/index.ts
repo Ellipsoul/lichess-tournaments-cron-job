@@ -5,6 +5,13 @@ import {
 } from "./config.js";
 import { getUpcomingTeamArenaTournaments, joinTournament } from "./lichess.js";
 
+/** Pause between consecutive join requests to stay within Lichess rate limits. */
+const joinRequestDelayMs = 5_000;
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 /**
  * Coordinates one complete run of the automation.
  *
@@ -21,6 +28,7 @@ async function main(): Promise<void> {
   const matches = upcoming.filter((tournament) => matchesTargetTournament(tournament.fullName));
 
   console.log(`Found ${upcoming.length} upcoming team battles; ${matches.length} match.`);
+  let joinsSent = 0;
   for (const tournament of matches) {
     // Convert Lichess's timestamp to ISO 8601 so logs are unambiguous in both
     // GitHub Actions (UTC) and a developer's local terminal.
@@ -30,9 +38,14 @@ async function main(): Promise<void> {
       continue;
     }
 
+    if (joinsSent > 0) {
+      await sleep(joinRequestDelayMs);
+    }
+
     console.log(`Joining ${tournament.fullName} (${tournament.id}, ${startsAt})…`);
     await joinTournament(tournament.id, config.token!, config.teamId!);
     console.log(`Joined ${tournament.id}.`);
+    joinsSent += 1;
   }
 }
 
