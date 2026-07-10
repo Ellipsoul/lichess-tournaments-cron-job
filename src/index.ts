@@ -1,5 +1,6 @@
 import {
   getRuntimeConfig,
+  loadLocalEnvFile,
   matchesTargetTournament,
   validateJoinConfig,
 } from "./config.js";
@@ -8,6 +9,8 @@ import {
   getEligibleOrganiserTeamBattles,
   joinTournament,
 } from "./lichess.js";
+
+loadLocalEnvFile();
 
 /** Pause between consecutive join requests to stay within Lichess rate limits. */
 const joinRequestDelayMs = 5_000;

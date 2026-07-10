@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+
 /** The root URL shared by every Lichess API request in this application. */
 export const lichessApiBaseUrl = "https://lichess.org/api";
 
@@ -56,6 +58,44 @@ export interface RuntimeConfig {
   dryRun: boolean;
   token?: string;
   teamId?: string;
+}
+
+/**
+ * Applies `KEY=value` lines to an environment object without overwriting values
+ * that are already set.
+ */
+export function applyEnvFileContent(
+  content: string,
+  environment: Record<string, string | undefined>,
+): void {
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex === -1) continue;
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const value = trimmed.slice(separatorIndex + 1).trim();
+    if (key && environment[key] === undefined) {
+      environment[key] = value;
+    }
+  }
+}
+
+/**
+ * Loads variables from `.env.local` when the file exists.
+ *
+ * GitHub Actions and other CI environments inject secrets directly into
+ * `process.env`, so they do not need a local env file. Existing environment
+ * variables always win over file values.
+ */
+export function loadLocalEnvFile(
+  filePath = ".env.local",
+  environment: NodeJS.ProcessEnv = process.env,
+): void {
+  if (!existsSync(filePath)) return;
+  applyEnvFileContent(readFileSync(filePath, "utf8"), environment);
 }
 
 /**

@@ -32,7 +32,7 @@ Dry run: log both groups          Real run: POST /api/tournament/{id}/join for t
 
 On each run the script calls the [Lichess user-created tournaments API](https://lichess.org/api#tag/Arena-tournaments/operation/apiUserNameTournamentCreated) once per known organiser (`luisalce`, `jeffforever`, and `cormacobear`), requesting both created and started events. It keeps only team battles whose `teamBattle.teams` list includes your team ID, then applies anchored regular expressions in `src/config.ts` to decide which titles to join. The older team arena listing was unreliable: it omitted some eligible events (for example Bundesliga) and excluded tournaments that had already started (for example Mega).
 
-`npm start` loads `.env.local` automatically when the file exists, so a dry run can use your token for already-joined detection without exporting variables manually.
+`npm start` loads `.env.local` when that file exists locally. GitHub Actions supplies secrets via workflow `env` instead, so no env file is required in CI.
 
 ## Tournaments joined
 

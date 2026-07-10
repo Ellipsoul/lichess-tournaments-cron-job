@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { matchesTargetTournament, validateJoinConfig } from "./config.js";
+import { applyEnvFileContent, matchesTargetTournament, validateJoinConfig } from "./config.js";
 import { isTeamBattle, parseNdjson, tournamentIncludesTeam } from "./lichess.js";
 
 /** These are representative titles from each verified tournament series. */
@@ -30,6 +30,28 @@ test("requires token for real runs", () => {
     () => validateJoinConfig({ dryRun: false, teamId: "example-team" }),
     /LICHESS_API_TOKEN is required/,
   );
+});
+
+test("applyEnvFileContent does not override existing environment values", () => {
+  const environment: Record<string, string | undefined> = {
+    LICHESS_TEAM_ID: "from-shell",
+    DRY_RUN: "true",
+  };
+
+  applyEnvFileContent(
+    [
+      "LICHESS_TEAM_ID=from-file",
+      "LICHESS_API_TOKEN=from-file",
+      "# comment",
+      "",
+      "DRY_RUN=false",
+    ].join("\n"),
+    environment,
+  );
+
+  assert.equal(environment.LICHESS_TEAM_ID, "from-shell");
+  assert.equal(environment.LICHESS_API_TOKEN, "from-file");
+  assert.equal(environment.DRY_RUN, "true");
 });
 
 test("parseNdjson reads newline-delimited objects", () => {
