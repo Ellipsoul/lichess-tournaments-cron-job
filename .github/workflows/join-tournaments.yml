@@ -18,6 +18,12 @@ permissions:
 jobs:
   join:
     runs-on: ubuntu-latest
+    # Load the Lichess secrets from this GitHub Actions environment. This job
+    # is an automation task, not a deployment, so avoid creating a deployment
+    # record for every scheduled run.
+    environment:
+      name: GitHub Action Environment
+      deployment: false
     timeout-minutes: 5
     env:
       LICHESS_API_TOKEN: ${{ secrets.LICHESS_API_TOKEN }}
