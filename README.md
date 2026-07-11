@@ -15,7 +15,7 @@ The script keeps no database or state between runs. Lichess remains the source o
 ## How it works
 
 ```text
-GitHub Actions (daily at 10:00 UTC)
+GitHub Actions (daily at 09:39 UTC)
         |
         v
 GET /api/user/{organiser}/tournament/created?status=10&status=20  (once per organiser)
@@ -102,7 +102,7 @@ Never commit a real token. `.env` files are ignored by Git.
 
 ## GitHub Actions setup
 
-The workflow in `.github/workflows/join-tournaments.yml` runs daily at **10:00 UTC** and can also be triggered manually from the Actions tab.
+The workflow in `.github/workflows/join-tournaments.yml` runs daily at **09:39 UTC** and can also be triggered manually from the Actions tab.
 
 ### 1. Create a Lichess token
 

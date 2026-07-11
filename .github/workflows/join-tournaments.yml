@@ -2,8 +2,8 @@ name: Join Lichess team tournaments
 
 on:
   schedule:
-    # Daily at 10:00 UTC. GitHub may delay scheduled workflows during high load.
-    - cron: "0 10 * * *"
+    # Daily at 09:39 UTC. Avoid :00 schedules — GitHub often delays or drops them.
+    - cron: "39 9 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
